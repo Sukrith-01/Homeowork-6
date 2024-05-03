@@ -15,7 +15,20 @@ import matplotlib.backends.backend_pdf as pdf
 #####     CHECK THE PARAMETERS     ########
 ######################################################################
 
-def calculate_SSE(data, labels):
+
+
+"""
+def plt_clustering(data, labels, title):
+    plt.figure(figsize=(8, 6))
+    plt.scatter(data[:, 0], data[:, 1], c=labels, cmap='viridis', s=10)
+    plt.title(title)
+    plt.xlabel('Feature 1')
+    plt.ylabel('Feature 2')
+    plt.colorbar(label='Cluster')
+    plt.grid(True)
+    plt.show()
+"""
+def comp_SSE(data, labels):
  
     sse = 0.0
     for i in np.unique(labels):
@@ -24,13 +37,12 @@ def calculate_SSE(data, labels):
         sse += np.sum((cluster_points - cluster_center) ** 2)
     return sse
 
-
-def proxi_msr(x, y, sigma):
+def proxmity_meas(x, y, sigma):
 
     dist_squared = np.sum((x - y) ** 2)
     return np.exp(-dist_squared / (2 * sigma ** 2))
 
-def adj_rand_ind(true_labels, pred_labels):
+def adjusted_rand_index(true_labels, pred_labels):
     """
     Compute the adjusted Rand index.
 
@@ -86,54 +98,53 @@ def spectral(
 
     # Construct the similarity matrix
     n_samples = data.shape[0]
-    similarity_mat = np.zeros((n_samples, n_samples))
+    similarity_matrix = np.zeros((n_samples, n_samples))
     for i in range(n_samples):
         for j in range(n_samples):
-            similarity_mat[i, j] = proxi_msr(data[i], data[j], sigma)
+            similarity_matrix[i, j] = proxmity_meas(data[i], data[j], sigma)
 
-    # Construct the Laplacian matrix
-    degree_mat = np.diag(np.sum(similarity_mat, axis=1))
-    laplacian_mat = degree_mat - similarity_mat
+    # Laplacian matrix
+    degree_matrix = np.diag(np.sum(similarity_matrix, axis=1))
+    laplacian_matrix = degree_matrix - similarity_matrix
 
-    # Compute eigenvectors and eigenvalues
-    eigenvalues, eigenvectors = eigh(laplacian_mat)
+    eigenvalues, eigenvectors = eigh(laplacian_matrix)
 
-    # Perform k-means clustering on the eigenvectors with k-means++ initialization
+    # k-means clustering on the eigenvectors
     _, computed_labels = kmeans2(eigenvectors[:, 1:k], k, minit='++')
 
-    # Compute SSE
-    SSE = calculate_SSE(data, computed_labels)
+    # SSE
+    SSE = comp_SSE(data, computed_labels)
 
-    # Compute adjusted Rand index
-    ARI = adj_rand_ind(labels, computed_labels)
+    # adjusted Rand index
+    ARI = adjusted_rand_index(labels, computed_labels)
 
     return computed_labels, SSE, ARI, eigenvalues
 
-def bst_spectral_hyperparam(data, labels) :
+def spectral_hyperparameter_study(data, labels):
     """
     Perform hyperparameter study for spectral clustering on the given data.
 
     Arguments:
     - data: input data array of shape (n_samples, n_features)
     - labels: true labels of the data
-    - sigma_range: Range for sigma hyperparameter
 
     Return values:
-    - best_sse: Best SSE achieved during hyperparameter study
+    - sigmas: Array of sigma values
+    - ari_scores: Array of ARI scores for each sigma value
+    - sse_scores: Array of SSE scores for each sigma value
     """
-    best_sse = float('inf')
-    
-    sigmas = np.logspace(-1, 1, num=10) 
+    ari_scores = []
+    sse_scores = []
+
+    sigmas = np.logspace(-1, 1, num=10)  
+    k = 5  
 
     for sigma in sigmas:
-        # Perform spectral clustering with current hyperparameters
-        computed_labels, sse, _, _ = spectral(data, labels, {'sigma': sigma, 'k': 5})
+        _, sse, ari, _ = spectral(data, labels, {'sigma': sigma, 'k': k})
+        sse_scores.append(sse)
+        ari_scores.append(ari)
 
-        if sse < best_sse:
-            best_sse = sse
-            best_sigma = sigma
-
-    return best_sigma, 5
+    return sigmas, np.array(ari_scores), np.array(sse_scores)
 
 def spectral_clustering():
     """
@@ -160,18 +171,46 @@ def spectral_clustering():
     
     data_subset = cluster_data[:1000]
     labels_subset = cluster_labels[:1000]
-
-
-    # Perform hyperparameter study
-    best_sigma,best_k = bst_spectral_hyperparam(data_subset, labels_subset)
+    
+    sigmas, ari_scores, sse_scores = spectral_hyperparameter_study(data_subset, labels_subset)
+    
+    pdf_pages = pdf.PdfPages("plots_for_spectral_clustering.pdf")
+    
+    # Plot ARI scores against sigma values
+    plt.figure(figsize=(8, 6))
+    plt.plot(sigmas, ari_scores, marker='o', color='g')
+    plt.title('ARI Scores vs Sigma Values')
+    plt.xlabel('Sigma Values')
+    plt.ylabel('ARI Scores')
+    plt.grid(True)
+    plt.xscale('log') 
+    pdf_pages.savefig()
+    plt.close()
+    
+    
+    # Plot SSE scores against sigma values
+    plt.figure(figsize=(8, 6))
+    plt.plot(sigmas, sse_scores, marker='o', color='b')
+    plt.title('SSE Scores vs Sigma Values')
+    plt.xlabel('Sigma Values')
+    plt.ylabel('SSE Scores')
+    plt.grid(True)
+    plt.xscale('log') 
+    pdf_pages.savefig() 
+    plt.close()
+    
+    
+    # After hyperparameter study
+    best_sigma = 0.1
+    best_k = 5
     
     plots_values={}
     # Apply best hyperparameters on five slices of data
     for i in [0,1,2,3,4]:
         data_slice = cluster_data[i * 1000: (i + 1) * 1000]
         labels_slice = cluster_labels[i * 1000: (i + 1) * 1000]
-        computed_labels, sse, ari, eig_values = spectral(data_slice, labels_slice, {'sigma': 0.1, 'k': best_k})
-        groups[i] = {"sigma": 0.1, "ARI": ari, "SSE": sse}
+        computed_labels, sse, ari, eig_values = spectral(data_slice, labels_slice, {'sigma': best_sigma, 'k': best_k})
+        groups[i] = {"sigma": best_sigma, "ARI": ari, "SSE": sse}
         plots_values[i] = {"computed_labels": computed_labels, "ARI": ari, "SSE": sse,"eig_values":eig_values} 
         
     highest_ari = -1
@@ -181,7 +220,6 @@ def spectral_clustering():
             highest_ari = group_info['ARI']
             best_dataset_index = i
             
-    pdf_pages = pdf.PdfPages("plots_for_spectral_clustering.pdf")
     
     # Plot the clusters for the dataset with the highest ARI
     plt.figure(figsize=(8, 6))
@@ -250,7 +288,7 @@ def spectral_clustering():
 
     # groups is the dictionary above
     answers["cluster parameters"] = groups
-    answers["1st group, SSE"] = groups[0]["SSE"]
+    answers["1st group, SSE"] = groups[0]["SSE"] #{}
 
     # Identify the cluster with the lowest value of ARI. This implies
     # that you set the cluster number to 5 when applying the spectral
